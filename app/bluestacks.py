@@ -422,6 +422,12 @@ def _image_from_screencap(data: bytes) -> QImage | None:
 
 
 def capture_screen() -> QImage:
+    global _last_cap_size
+    if sys.platform == "win32":
+        window = capture_window_frame()
+        if window is not None and not window.isNull():
+            _last_cap_size = (window.width(), window.height())
+            return window
     local = capture_screen_path()
     image = QImage(str(local))
     if image.isNull():
@@ -677,9 +683,30 @@ def reset_swipe_mouse() -> None:
     _view_cache = None
 
 
+def _window_exe_name(user32, kernel32, wintypes, hwnd) -> str:
+    import ctypes
+
+    pid = wintypes.DWORD()
+    user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
+    if not pid.value:
+        return ""
+    handle = kernel32.OpenProcess(0x1000, False, pid.value)
+    if not handle:
+        return ""
+    try:
+        size = wintypes.DWORD(1024)
+        buf = ctypes.create_unicode_buffer(size.value)
+        if not kernel32.QueryFullProcessImageNameW(handle, 0, buf, ctypes.byref(size)):
+            return ""
+        return Path(buf.value).name.lower()
+    finally:
+        kernel32.CloseHandle(handle)
+
+
 def _player_hwnd(user32, wintypes):
     import ctypes
 
+    kernel32 = ctypes.windll.kernel32
     found: list[tuple[int, int]] = []
 
     def _cb(hwnd, _lparam):
@@ -689,11 +716,15 @@ def _player_hwnd(user32, wintypes):
         buf = ctypes.create_unicode_buffer(length + 1)
         user32.GetWindowTextW(hwnd, buf, length + 1)
         title = buf.value.lower()
-        if "bluestacks" in title or "pie64" in title or "hd-player" in title:
-            rect = wintypes.RECT()
-            user32.GetWindowRect(hwnd, ctypes.byref(rect))
-            area = max(0, rect.right - rect.left) * max(0, rect.bottom - rect.top)
-            found.append((area, hwnd))
+        named = "bluestacks" in title or "pie64" in title or "hd-player" in title
+        if not named and _window_exe_name(user32, kernel32, wintypes, hwnd) != "hd-player.exe":
+            return True
+        rect = wintypes.RECT()
+        user32.GetWindowRect(hwnd, ctypes.byref(rect))
+        area = max(0, rect.right - rect.left) * max(0, rect.bottom - rect.top)
+        if area <= 0:
+            return True
+        found.append((area, hwnd))
         return True
 
     enum_proc = ctypes.WINFUNCTYPE(ctypes.c_bool, wintypes.HWND, wintypes.LPARAM)
