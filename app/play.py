@@ -4,6 +4,7 @@ import colorsys
 import json
 import math
 import random
+import subprocess
 import sys
 import tempfile
 import time
@@ -224,6 +225,27 @@ class PlayWorker(QThread):
             flush_style()
 
 
+def _python_for_pip() -> str:
+    exe = Path(sys.executable)
+    if exe.name.lower() == "pythonw.exe":
+        console = exe.with_name("python.exe")
+        if console.is_file():
+            return str(console)
+    return str(exe)
+
+
+def _install_screen_libs() -> bool:
+    flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+    result = subprocess.run(
+        [_python_for_pip(), "-m", "pip", "install", "Pillow", "torch", "torchvision"],
+        check=False,
+        capture_output=True,
+        text=True,
+        creationflags=flags,
+    )
+    return result.returncode == 0
+
+
 def run_play(
     report: StatusFn | None,
     stop: Event | None,
@@ -328,12 +350,21 @@ def run_play(
             kind_count = asked
 
     say("モデルを読み込み中")
-    try:
-        predictor, candidates = load_play_tools()
-    except ModuleNotFoundError as exc:
-        raise RuntimeError(
-            "画面認識に必要なライブラリがありません。画面認識アプリと同じ Python で起動してください。"
-        ) from exc
+    tried_libs = False
+    while True:
+        try:
+            predictor, candidates = load_play_tools()
+            break
+        except ModuleNotFoundError as exc:
+            missing = (exc.name or "").split(".", 1)[0]
+            if tried_libs or missing not in {"PIL", "torch", "torchvision"}:
+                raise RuntimeError(
+                    f"画面認識に必要なライブラリがありません。（{missing or exc}）"
+                ) from exc
+            tried_libs = True
+            say("画面認識のライブラリを入れています")
+            if not _install_screen_libs():
+                raise RuntimeError("画面認識のライブラリを入れられませんでした。") from exc
     if getattr(predictor, "piece_model", None) is None:
         raise RuntimeError("ツムの〇モデルがありません。画面認識アプリで学習してください。")
     if getattr(predictor, "type_model", None) is None:
