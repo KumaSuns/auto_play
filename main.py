@@ -1341,8 +1341,8 @@ def _model_token() -> str:
     try:
         from app.server_sync import api_token
     except Exception:
-        return ""
-    return str(api_token() or "").strip()
+        return "kumadesk-workshop-local"
+    return str(api_token() or "").strip() or "kumadesk-workshop-local"
 
 
 def _server_model_sha1(token: str) -> str:
