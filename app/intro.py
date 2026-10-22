@@ -64,6 +64,7 @@ def run_intro_flow(report: StatusFn | None = None, stop: Event | None = None) ->
     deadline = time.time() + BOOT_TIMEOUT + FLOW_TIMEOUT
     previous: QImage | None = None
     motion_hits = 0
+    still_hits = 0
     dialog_hits = 0
     start_hits = 0
     clicked_center = False
@@ -116,15 +117,20 @@ def run_intro_flow(report: StatusFn | None = None, stop: Event | None = None) ->
                 say("ツムツムを起動します")
             if _is_video_motion(previous, image):
                 motion_hits += 1
+                still_hits = 0
                 say(f"動画を検出 {motion_hits}/{VIDEO_STABLE}")
             else:
                 motion_hits = 0
+                still_hits += 1
                 say("許可画面なし、動画を待っています")
             if motion_hits >= VIDEO_STABLE:
                 say("画面中央をクリックします")
                 _slow_tap(image.width() // 2, image.height() // 2)
                 clicked_center = True
                 say("許可画面を待っています")
+            elif still_hits >= VIDEO_STABLE:
+                _dismiss_popups(say, deadline, stop)
+                return
         elif clicked_allow:
             say("TAP TO STARTを待っています")
         else:
