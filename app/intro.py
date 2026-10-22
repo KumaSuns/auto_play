@@ -205,6 +205,7 @@ def _press_play(play: QRect, say: StatusFn) -> None:
 def _dismiss_popups(say: StatusFn, deadline: float, stop: Event | None = None) -> None:
     play_hits = 0
     popup_hits = 0
+    closed_at: tuple[int, int] | None = None
     while time.time() < deadline:
         _check_stop(stop)
         try:
@@ -228,6 +229,16 @@ def _dismiss_popups(say: StatusFn, deadline: float, stop: Event | None = None) -
         close = None if cancel is not None else _close_button(image)
         target = cancel or close
         if target is not None:
+            point = (target.center().x(), target.center().y())
+            same_close = (
+                closed_at is not None
+                and abs(point[0] - closed_at[0]) < image.width() * 0.08
+                and abs(point[1] - closed_at[1]) < image.height() * 0.08
+            )
+            if same_close:
+                say("プレイを待っています")
+                time.sleep(0.35)
+                continue
             popup_hits += 1
             if popup_hits < POPUP_STABLE:
                 say("ポップアップを検出")
@@ -237,7 +248,8 @@ def _dismiss_popups(say: StatusFn, deadline: float, stop: Event | None = None) -
                 say("キャンセルをクリックします")
             else:
                 say("とじるをクリックします")
-            _slow_tap(target.center().x(), target.center().y())
+            _slow_tap(point[0], point[1])
+            closed_at = point
             popup_hits = 0
             time.sleep(0.7)
             continue
@@ -500,7 +512,96 @@ def _play_button(image: QImage) -> QRect | None:
     return found
 
 
+def _is_play_fill(pixel: tuple[int, int, int]) -> bool:
+    if _is_start_yellow(pixel):
+        return True
+    red, green, blue = pixel
+    return (
+        red > 190
+        and green > 40
+        and blue < 110
+        and red > green
+        and red > blue + 50
+        and green + 40 > blue
+    )
+
+
+def _wide_bottom_play(image: QImage) -> QRect | None:
+    sample = _sample(image)
+    height = len(sample)
+    width = len(sample[0]) if sample else 0
+    if width < 8 or height < 8:
+        return None
+    y0 = int(height * 0.58)
+    y1 = min(height, int(height * 0.94))
+    min_run = int(width * 0.34)
+    rows: list[tuple[int, int, int]] = []
+    for y in range(y0, y1):
+        best: tuple[int, int, int] | None = None
+        left = None
+        right = None
+        holes = 0
+        for x in range(width):
+            if _is_play_fill(sample[y][x]):
+                if left is None:
+                    left = x
+                right = x
+                holes = 0
+                continue
+            if left is None:
+                continue
+            holes += 1
+            if holes > 3:
+                length = right - left + 1
+                if best is None or length > best[0]:
+                    best = (length, left, right)
+                left = None
+                right = None
+                holes = 0
+        if left is not None and right is not None:
+            length = right - left + 1
+            if best is None or length > best[0]:
+                best = (length, left, right)
+        if best is None or best[0] < min_run:
+            continue
+        center = (best[1] + best[2]) / 2
+        if abs(center - width / 2) > width * 0.18:
+            continue
+        rows.append((y, best[1], best[2]))
+    if len(rows) < 2:
+        return None
+    groups: list[list[tuple[int, int, int]]] = [[rows[0]]]
+    for row in rows[1:]:
+        if row[0] <= groups[-1][-1][0] + 2:
+            groups[-1].append(row)
+        else:
+            groups.append([row])
+    band = max(groups, key=lambda group: group[-1][0])
+    if len(band) < 2:
+        return None
+    top = band[0][0]
+    bottom = band[-1][0]
+    left = min(row[1] for row in band)
+    right = max(row[2] for row in band)
+    if right - left + 1 < min_run:
+        return None
+    scale_x = image.width() / width
+    scale_y = image.height() / height
+    rect = QRect(
+        int(left * scale_x),
+        int(top * scale_y),
+        max(1, int((right - left + 1) * scale_x)),
+        max(1, int((bottom - top + 1) * scale_y)),
+    )
+    if _is_daily_mission(image, rect):
+        return None
+    return rect
+
+
 def _home_play_button(image: QImage) -> QRect | None:
+    wide = _wide_bottom_play(image)
+    if wide is not None:
+        return wide
     if (
         _retry_button(image) is not None
         or _pause_continue_button(image) is not None
