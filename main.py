@@ -1627,8 +1627,45 @@ def _acquire_instance_lock() -> QLockFile | None:
     return None
 
 
+def _python_for_pip() -> Path:
+    exe = Path(sys.executable)
+    if exe.name.lower() == "pythonw.exe":
+        console = exe.with_name("python.exe")
+        if console.is_file():
+            return console
+    return exe
+
+
+def _ensure_pillow() -> None:
+    try:
+        import PIL.Image  # noqa: F401
+        return
+    except ModuleNotFoundError:
+        sys.modules.pop("PIL", None)
+    exe = _python_for_pip()
+    flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+    subprocess.run(
+        [str(exe), "-m", "pip", "install", "Pillow"],
+        check=False,
+        capture_output=True,
+        text=True,
+        creationflags=flags,
+    )
+    sys.modules.pop("PIL", None)
+
+
 def main() -> None:
+    _ensure_pillow()
     app = QApplication(sys.argv)
+    try:
+        import PIL.Image  # noqa: F401
+    except ModuleNotFoundError:
+        exe = _python_for_pip()
+        QMessageBox.critical(
+            None,
+            "Pillow",
+            "Pillow が入っていません。\n" + f'"{exe}" -m pip install Pillow',
+        )
     lock = _acquire_instance_lock()
     if lock is None:
         if not _handoff_to_running():
