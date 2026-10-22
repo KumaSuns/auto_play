@@ -205,7 +205,6 @@ def _press_play(play: QRect, say: StatusFn) -> None:
 def _dismiss_popups(say: StatusFn, deadline: float, stop: Event | None = None) -> None:
     play_hits = 0
     popup_hits = 0
-    closed_at: tuple[int, int] | None = None
     while time.time() < deadline:
         _check_stop(stop)
         try:
@@ -225,34 +224,6 @@ def _dismiss_popups(say: StatusFn, deadline: float, stop: Event | None = None) -
             time.sleep(0.35)
             continue
         play_hits = 0
-        cancel = _cancel_button(image)
-        close = None if cancel is not None else _close_button(image)
-        target = cancel or close
-        if target is not None:
-            point = (target.center().x(), target.center().y())
-            same_close = (
-                closed_at is not None
-                and abs(point[0] - closed_at[0]) < image.width() * 0.08
-                and abs(point[1] - closed_at[1]) < image.height() * 0.08
-            )
-            if same_close:
-                say("プレイを待っています")
-                time.sleep(0.35)
-                continue
-            popup_hits += 1
-            if popup_hits < POPUP_STABLE:
-                say("ポップアップを検出")
-                time.sleep(0.35)
-                continue
-            if cancel is not None:
-                say("キャンセルをクリックします")
-            else:
-                say("とじるをクリックします")
-            _slow_tap(point[0], point[1])
-            closed_at = point
-            popup_hits = 0
-            time.sleep(0.7)
-            continue
         popup_hits = 0
         say("プレイを待っています")
         time.sleep(0.35)
@@ -526,48 +497,51 @@ def _is_play_fill(pixel: tuple[int, int, int]) -> bool:
     )
 
 
+def _yellow_pair_left(image: QImage) -> QRect | None:
+    pills = _yellow_pills(image)
+    if len(pills) < 2:
+        return None
+    for index, left in enumerate(pills[:-1]):
+        right = pills[index + 1]
+        if abs(left.center().y() - right.center().y()) > max(left.height(), right.height()) * 0.6:
+            continue
+        if abs(left.height() - right.height()) > max(left.height(), right.height()) * 0.5:
+            continue
+        gap = right.x() - left.right()
+        if gap < -left.width() * 0.2 or gap > left.width() * 2.2:
+            continue
+        if left.width() < image.width() * 0.18 or right.width() < image.width() * 0.18:
+            continue
+        if _is_daily_mission(image, right) or _is_daily_mission(image, left):
+            continue
+        return left
+    return None
+
+
 def _wide_bottom_play(image: QImage) -> QRect | None:
     sample = _sample(image)
     height = len(sample)
     width = len(sample[0]) if sample else 0
     if width < 8 or height < 8:
         return None
-    y0 = int(height * 0.58)
-    y1 = min(height, int(height * 0.94))
-    min_run = int(width * 0.34)
+    y0 = int(height * 0.68)
+    y1 = min(height, int(height * 0.96))
+    x0 = int(width * 0.12)
+    x1 = int(width * 0.88)
+    need = max(8, int(width * 0.12))
+    min_span = int(width * 0.28)
     rows: list[tuple[int, int, int]] = []
     for y in range(y0, y1):
-        best: tuple[int, int, int] | None = None
-        left = None
-        right = None
-        holes = 0
-        for x in range(width):
-            if _is_play_fill(sample[y][x]):
-                if left is None:
-                    left = x
-                right = x
-                holes = 0
-                continue
-            if left is None:
-                continue
-            holes += 1
-            if holes > 3:
-                length = right - left + 1
-                if best is None or length > best[0]:
-                    best = (length, left, right)
-                left = None
-                right = None
-                holes = 0
-        if left is not None and right is not None:
-            length = right - left + 1
-            if best is None or length > best[0]:
-                best = (length, left, right)
-        if best is None or best[0] < min_run:
+        xs = [x for x in range(x0, x1) if _is_play_fill(sample[y][x])]
+        if len(xs) < need:
             continue
-        center = (best[1] + best[2]) / 2
-        if abs(center - width / 2) > width * 0.18:
+        left, right = min(xs), max(xs)
+        if right - left + 1 < min_span:
             continue
-        rows.append((y, best[1], best[2]))
+        center = (left + right) / 2
+        if abs(center - width / 2) > width * 0.16:
+            continue
+        rows.append((y, left, right))
     if len(rows) < 2:
         return None
     groups: list[list[tuple[int, int, int]]] = [[rows[0]]]
@@ -583,7 +557,7 @@ def _wide_bottom_play(image: QImage) -> QRect | None:
     bottom = band[-1][0]
     left = min(row[1] for row in band)
     right = max(row[2] for row in band)
-    if right - left + 1 < min_run:
+    if right - left + 1 < min_span:
         return None
     scale_x = image.width() / width
     scale_y = image.height() / height
@@ -599,6 +573,8 @@ def _wide_bottom_play(image: QImage) -> QRect | None:
 
 
 def _home_play_button(image: QImage) -> QRect | None:
+    if _yellow_pair_left(image) is not None:
+        return None
     wide = _wide_bottom_play(image)
     if wide is not None:
         return wide
@@ -803,26 +779,9 @@ def _match_start_button(image: QImage) -> QRect | None:
 
 
 def _cancel_button(image: QImage) -> QRect | None:
-    pills = _yellow_pills(image)
-    if len(pills) < 2:
+    if _play_button(image) is not None:
         return None
-    for index, left in enumerate(pills[:-1]):
-        right = pills[index + 1]
-        if abs(left.center().y() - right.center().y()) > max(left.height(), right.height()) * 0.6:
-            continue
-        if abs(left.height() - right.height()) > max(left.height(), right.height()) * 0.5:
-            continue
-        gap = right.x() - left.right()
-        if gap < -left.width() * 0.2 or gap > left.width() * 2.2:
-            continue
-        if left.width() < image.width() * 0.18 or right.width() < image.width() * 0.18:
-            continue
-        if _is_daily_mission(image, right) or _is_daily_mission(image, left):
-            continue
-        if _play_button(image) is not None:
-            return None
-        return left
-    return None
+    return _yellow_pair_left(image)
 
 
 def _has_highscore_plate(image: QImage) -> bool:
@@ -863,24 +822,7 @@ def _close_button(image: QImage) -> QRect | None:
         ]
         if pills:
             return max(pills, key=lambda rect: rect.width() * rect.height())
-    if (
-        _home_play_button(image) is not None
-        or _cancel_button(image) is not None
-        or _pause_continue_button(image) is not None
-    ):
-        return None
-    pills = [
-        pill
-        for pill in _yellow_pills(image)
-        if pill.center().y() > image.height() * 0.55
-        and abs(pill.center().x() - image.width() / 2) < image.width() * 0.28
-        and not _is_daily_mission(image, pill)
-    ]
-    if not pills:
-        return None
-    if len(pills) >= 3:
-        return pills[len(pills) // 2]
-    return max(pills, key=lambda rect: rect.width() * rect.height())
+    return None
 
 
 def _is_highscore_cyan(pixel: tuple[int, int, int]) -> bool:

@@ -1798,23 +1798,8 @@ def run_play(
                     _slow_tap(play.center().x(), play.center().y())
                     _sleep_stop(2.0, stop)
                     continue
-                close = None if image.isNull() else _close_button(image)
-                if close is not None:
-                    point = (close.center().x(), close.center().y())
-                    same_close = (
-                        last_close_at is not None
-                        and abs(point[0] - last_close_at[0]) < image.width() * 0.08
-                        and abs(point[1] - last_close_at[1]) < image.height() * 0.08
-                    )
-                    if same_close:
-                        say("プレイを待っています")
-                        _sleep_stop(0.4, stop)
-                        continue
-                    say("とじるをクリックします")
-                    _slow_tap(point[0], point[1])
-                    last_close_at = point
-                    _sleep_stop(1.2, stop)
-                    continue
+                say("プレイを待っています")
+                _sleep_stop(0.35, stop)
                 continue
             erased_now = False
             if credit_pending(rgb):
@@ -4400,7 +4385,6 @@ def _click_start_or_continue(
     locked = False
     used_name = ""
     items: list[str] | None = None
-    closed_at: tuple[int, int] | None = None
     while time.time() < deadline:
         _check_stop(stop)
         if finish_after is not None and finish_after.is_set():
@@ -4472,35 +4456,10 @@ def _click_start_or_continue(
             else:
                 say("続けるを検出しました")
             return kinds, locked, "continue", used_name, items
-        cancel = _cancel_button(image)
-        if cancel is not None:
-            say("キャンセルをクリックします")
-            _slow_tap(cancel.center().x(), cancel.center().y())
-            _sleep_stop(1.2, stop)
-            deadline = max(deadline, time.time() + 12)
-            continue
         play = _home_play_button(image)
         if play is not None:
             say("プレイをクリックします")
             _slow_tap(play.center().x(), play.center().y())
-            _sleep_stop(1.2, stop)
-            deadline = max(deadline, time.time() + 12)
-            continue
-        close = _close_button(image)
-        if close is not None:
-            point = (close.center().x(), close.center().y())
-            same_close = (
-                closed_at is not None
-                and abs(point[0] - closed_at[0]) < image.width() * 0.08
-                and abs(point[1] - closed_at[1]) < image.height() * 0.08
-            )
-            if same_close:
-                say("プレイを待っています")
-                _sleep_stop(0.4, stop)
-                continue
-            say("とじるをクリックします")
-            _slow_tap(point[0], point[1])
-            closed_at = point
             _sleep_stop(1.2, stop)
             deadline = max(deadline, time.time() + 12)
             continue
