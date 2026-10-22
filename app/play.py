@@ -234,16 +234,50 @@ def _python_for_pip() -> str:
     return str(exe)
 
 
-def _install_screen_libs() -> bool:
+def _pip_run(args: list[str]) -> subprocess.CompletedProcess[str]:
     flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
-    result = subprocess.run(
-        [_python_for_pip(), "-m", "pip", "install", "Pillow", "torch", "torchvision"],
+    return subprocess.run(
+        [_python_for_pip(), "-m", *args],
         check=False,
         capture_output=True,
         text=True,
+        encoding="utf-8",
+        errors="replace",
         creationflags=flags,
     )
-    return result.returncode == 0
+
+
+def _pip_tail(result: subprocess.CompletedProcess[str]) -> str:
+    text = f"{result.stderr or ''}\n{result.stdout or ''}".strip()
+    lines = [line.strip() for line in text.splitlines() if line.strip()]
+    return "\n".join(lines[-8:])
+
+
+def _install_screen_libs() -> str:
+    probe = _pip_run(["pip", "--version"])
+    if probe.returncode != 0:
+        _pip_run(["ensurepip", "--upgrade"])
+    pillow = _pip_run(["pip", "install", "--disable-pip-version-check", "Pillow"])
+    if pillow.returncode != 0:
+        return _pip_tail(pillow) or "Pillow を入れられませんでした。"
+    torch = _pip_run(
+        [
+            "pip",
+            "install",
+            "--disable-pip-version-check",
+            "torch",
+            "torchvision",
+            "--index-url",
+            "https://download.pytorch.org/whl/cpu",
+        ]
+    )
+    if torch.returncode != 0:
+        torch = _pip_run(
+            ["pip", "install", "--disable-pip-version-check", "torch", "torchvision"]
+        )
+    if torch.returncode != 0:
+        return _pip_tail(torch) or "torch を入れられませんでした。"
+    return ""
 
 
 def run_play(
@@ -363,8 +397,11 @@ def run_play(
                 ) from exc
             tried_libs = True
             say("画面認識のライブラリを入れています")
-            if not _install_screen_libs():
-                raise RuntimeError("画面認識のライブラリを入れられませんでした。") from exc
+            detail = _install_screen_libs()
+            if detail:
+                raise RuntimeError(
+                    "画面認識のライブラリを入れられませんでした。\n" + detail
+                ) from exc
     if getattr(predictor, "piece_model", None) is None:
         raise RuntimeError("ツムの〇モデルがありません。画面認識アプリで学習してください。")
     if getattr(predictor, "type_model", None) is None:
