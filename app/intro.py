@@ -64,6 +64,7 @@ def run_intro_flow(report: StatusFn | None = None, stop: Event | None = None) ->
     deadline = time.time() + BOOT_TIMEOUT + FLOW_TIMEOUT
     previous: QImage | None = None
     motion_hits = 0
+    still_hits = 0
     dialog_hits = 0
     start_hits = 0
     play_hits = 0
@@ -113,6 +114,7 @@ def run_intro_flow(report: StatusFn | None = None, stop: Event | None = None) ->
         if play is not None:
             play_hits += 1
             motion_hits = 0
+            still_hits = 0
             say(f"プレイを検出 {play_hits}/{PLAY_STABLE}")
             if play_hits >= PLAY_STABLE:
                 _press_play(play, say)
@@ -131,15 +133,20 @@ def run_intro_flow(report: StatusFn | None = None, stop: Event | None = None) ->
                 say("ツムツムを起動します")
             if _is_video_motion(previous, image):
                 motion_hits += 1
+                still_hits = 0
                 say(f"動画を検出 {motion_hits}/{VIDEO_STABLE}")
             else:
                 motion_hits = 0
+                still_hits += 1
                 say("許可画面なし、動画を待っています")
             if motion_hits >= VIDEO_STABLE:
                 say("画面中央をクリックします")
                 _slow_tap(image.width() // 2, image.height() // 2)
                 clicked_center = True
                 say("許可画面を待っています")
+            elif still_hits >= VIDEO_STABLE:
+                _dismiss_popups(say, deadline, stop)
+                return
         elif clicked_allow:
             say("TAP TO STARTを待っています")
         else:
@@ -501,7 +508,7 @@ def _home_play_button(image: QImage) -> QRect | None:
     ):
         return None
     bottom = []
-    for pill in _yellow_pills(image):
+    for pill in _yellow_pills(image, max_w_frac=0.85):
         if pill.center().y() <= image.height() * 0.58:
             continue
         if pill.width() < image.width() * 0.18:
@@ -756,7 +763,7 @@ def _close_button(image: QImage) -> QRect | None:
         if pills:
             return max(pills, key=lambda rect: rect.width() * rect.height())
     if (
-        _play_button(image) is not None
+        _home_play_button(image) is not None
         or _cancel_button(image) is not None
         or _pause_continue_button(image) is not None
     ):
