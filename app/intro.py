@@ -64,9 +64,9 @@ def run_intro_flow(report: StatusFn | None = None, stop: Event | None = None) ->
     deadline = time.time() + BOOT_TIMEOUT + FLOW_TIMEOUT
     previous: QImage | None = None
     motion_hits = 0
-    still_hits = 0
     dialog_hits = 0
     start_hits = 0
+    play_hits = 0
     clicked_center = False
     clicked_allow = False
     launched_package = False
@@ -82,6 +82,7 @@ def run_intro_flow(report: StatusFn | None = None, stop: Event | None = None) ->
         if dialog is not None and not clicked_allow:
             dialog_hits += 1
             start_hits = 0
+            play_hits = 0
             say(f"許可画面を検出 {dialog_hits}/{DIALOG_STABLE}")
             if dialog_hits >= DIALOG_STABLE:
                 say("許可するをクリックします")
@@ -96,6 +97,7 @@ def run_intro_flow(report: StatusFn | None = None, stop: Event | None = None) ->
         start_btn = _tap_to_start_button(image)
         if start_btn is not None:
             start_hits += 1
+            play_hits = 0
             say(f"TAP TO STARTを検出 {start_hits}/{START_STABLE}")
             if start_hits >= START_STABLE:
                 say("TAP TO STARTをクリックします")
@@ -107,6 +109,18 @@ def run_intro_flow(report: StatusFn | None = None, stop: Event | None = None) ->
             time.sleep(0.35)
             continue
         start_hits = 0
+        play = _home_play_button(image)
+        if play is not None:
+            play_hits += 1
+            motion_hits = 0
+            say(f"プレイを検出 {play_hits}/{PLAY_STABLE}")
+            if play_hits >= PLAY_STABLE:
+                _press_play(play, say)
+                return
+            previous = image
+            time.sleep(0.35)
+            continue
+        play_hits = 0
         if not clicked_center and not clicked_allow:
             if not launched_package and not tsum_is_running():
                 launched_package = True
@@ -117,20 +131,15 @@ def run_intro_flow(report: StatusFn | None = None, stop: Event | None = None) ->
                 say("ツムツムを起動します")
             if _is_video_motion(previous, image):
                 motion_hits += 1
-                still_hits = 0
                 say(f"動画を検出 {motion_hits}/{VIDEO_STABLE}")
             else:
                 motion_hits = 0
-                still_hits += 1
                 say("許可画面なし、動画を待っています")
             if motion_hits >= VIDEO_STABLE:
                 say("画面中央をクリックします")
                 _slow_tap(image.width() // 2, image.height() // 2)
                 clicked_center = True
                 say("許可画面を待っています")
-            elif still_hits >= VIDEO_STABLE:
-                _dismiss_popups(say, deadline, stop)
-                return
         elif clicked_allow:
             say("TAP TO STARTを待っています")
         else:
@@ -172,6 +181,20 @@ def _click_start(button: QRect, say: StatusFn) -> None:
         _slow_tap(still.center().x(), still.center().y())
 
 
+def _press_play(play: QRect, say: StatusFn) -> None:
+    say("プレイをクリックします")
+    _slow_tap(play.center().x(), play.center().y())
+    time.sleep(0.8)
+    try:
+        still = _home_play_button(capture_screen())
+    except Exception:
+        still = None
+    if still is not None:
+        say("プレイを再タップします")
+        _slow_tap(still.center().x(), still.center().y())
+    say("プレイまで終わりました")
+
+
 def _dismiss_popups(say: StatusFn, deadline: float, stop: Event | None = None) -> None:
     play_hits = 0
     popup_hits = 0
@@ -183,23 +206,13 @@ def _dismiss_popups(say: StatusFn, deadline: float, stop: Event | None = None) -
             say("画面を待っています")
             time.sleep(1.0)
             continue
-        play = _play_button(image)
+        play = _home_play_button(image)
         if play is not None:
             popup_hits = 0
             play_hits += 1
             say(f"プレイを検出 {play_hits}/{PLAY_STABLE}")
             if play_hits >= PLAY_STABLE:
-                say("プレイをクリックします")
-                _slow_tap(play.center().x(), play.center().y())
-                time.sleep(0.8)
-                try:
-                    still = _play_button(capture_screen())
-                except Exception:
-                    still = None
-                if still is not None:
-                    say("プレイを再タップします")
-                    _slow_tap(still.center().x(), still.center().y())
-                say("プレイまで終わりました")
+                _press_play(play, say)
                 return
             time.sleep(0.35)
             continue
@@ -470,6 +483,17 @@ def _daily_mission_button(image: QImage) -> QRect | None:
 
 
 def _play_button(image: QImage) -> QRect | None:
+    found = _home_play_button(image)
+    if found is None:
+        return None
+    if not _retry_is_orange(image, found):
+        return None
+    if _menu_pair_rows(image, found.y()) >= 2:
+        return None
+    return found
+
+
+def _home_play_button(image: QImage) -> QRect | None:
     if (
         _retry_button(image) is not None
         or _pause_continue_button(image) is not None
@@ -486,15 +510,10 @@ def _play_button(image: QImage) -> QRect | None:
             continue
         if _is_daily_mission(image, pill):
             continue
-        if not _retry_is_orange(image, pill):
-            continue
         bottom.append(pill)
     if not bottom:
         return None
-    play = max(bottom, key=lambda rect: rect.center().y())
-    if _menu_pair_rows(image, play.y()) >= 2:
-        return None
-    return play
+    return max(bottom, key=lambda rect: rect.center().y())
 
 
 def _retry_button(image: QImage) -> QRect | None:
