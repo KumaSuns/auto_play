@@ -7,7 +7,7 @@ from threading import Event
 from PySide6.QtCore import QRect, QThread, Signal
 from PySide6.QtGui import QImage
 
-from app.bluestacks import capture_screen, tap, tsum_is_running
+from app.bluestacks import capture_screen, launch_tsum_package, tap, tsum_is_running
 
 SAMPLE_W = 160
 SAMPLE_H = 90
@@ -68,6 +68,7 @@ def run_intro_flow(report: StatusFn | None = None, stop: Event | None = None) ->
     start_hits = 0
     clicked_center = False
     clicked_allow = False
+    launched_package = False
     while time.time() < deadline:
         _check_stop(stop)
         try:
@@ -105,7 +106,14 @@ def run_intro_flow(report: StatusFn | None = None, stop: Event | None = None) ->
             time.sleep(0.35)
             continue
         start_hits = 0
-        if not clicked_center and not clicked_allow and tsum_is_running():
+        if not clicked_center and not clicked_allow:
+            if not launched_package and not tsum_is_running():
+                launched_package = True
+                try:
+                    launch_tsum_package()
+                except FileNotFoundError:
+                    pass
+                say("ツムツムを起動します")
             if _is_video_motion(previous, image):
                 motion_hits += 1
                 say(f"動画を検出 {motion_hits}/{VIDEO_STABLE}")
@@ -119,8 +127,6 @@ def run_intro_flow(report: StatusFn | None = None, stop: Event | None = None) ->
                 say("許可画面を待っています")
         elif clicked_allow:
             say("TAP TO STARTを待っています")
-        elif not tsum_is_running():
-            say("ツムツムの起動を待っています")
         else:
             say("許可画面を待っています")
         previous = image

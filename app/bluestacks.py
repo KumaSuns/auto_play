@@ -107,11 +107,7 @@ def tsum_is_running() -> bool:
     return _package_running()
 
 
-def start_tsum(desktop: str) -> Path | None:
-    shortcut = _find_shortcut(desktop)
-    if shortcut is not None:
-        os.startfile(str(shortcut))
-        return shortcut
+def launch_tsum_package() -> None:
     if not PLAYER.exists():
         raise FileNotFoundError("BlueStacks が見つかりませんでした。")
     subprocess.Popen(
@@ -129,6 +125,14 @@ def start_tsum(desktop: str) -> Path | None:
         cwd=str(PLAYER.parent),
         creationflags=_NO_WINDOW,
     )
+
+
+def start_tsum(desktop: str) -> Path | None:
+    shortcut = _find_shortcut(desktop)
+    if shortcut is not None:
+        os.startfile(str(shortcut))
+        return shortcut
+    launch_tsum_package()
     return None
 
 
