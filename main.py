@@ -1121,6 +1121,7 @@ class MenuWindow(QMainWindow):
             if number == 6:
                 button.clicked.connect(self._open_tsum_about)
             if number == 3:
+                button.setEnabled(False)
                 button.clicked.connect(self._send_hearts)
             if number == 4:
                 button.setCheckable(True)
@@ -1699,7 +1700,7 @@ class MenuWindow(QMainWindow):
         grid.addWidget(end_button, 0, 0, Qt.AlignmentFlag.AlignLeft)
         play_button = QPushButton("オートプレイ")
         play_button.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
-        play_button.setStyleSheet(_side_button_style("#ffffff", "#17233f", "#bdbdbd"))
+        play_button.setStyleSheet(_side_button_style("#F0A202", "#17233f", "#C47E00"))
         self._autoplay_button = play_button
         self._write_button_key(play_button, "オートプレイ", "F3")
         play_button.clicked.connect(self._on_autoplay)
